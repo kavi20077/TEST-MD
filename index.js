@@ -1,8 +1,21 @@
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pino from 'pino';
+import http from 'http'; // 1. http library එක import කරා
 
-// Koyeb Environment Variable එකෙන් API Key එක ගන්නවා
+// 2. Koyeb Health Check එක පාස් කරන්න පොඩි server එකක් හදනවා
+const port = process.env.PORT || 8000;
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is Alive! WhatsApp is running.');
+});
+
+server.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+});
+
+// --- Bot Logic ---
+
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
@@ -11,7 +24,7 @@ async function connectToWhatsApp() {
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true, // QR එක Log එකේ පෙන්නන්න
+        printQRInTerminal: true,
         auth: state,
     });
 
@@ -19,11 +32,12 @@ async function connectToWhatsApp() {
         const { connection, lastDisconnect, qr } = update;
         
         if(qr) {
-            console.log("Scan this QR Code from Koyeb Logs:");
+            console.log("Scan the QR below:");
         }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+            // Connection වැටුනොත් ආයේ connect වෙන්න
             if (shouldReconnect) {
                 connectToWhatsApp();
             }
@@ -59,10 +73,8 @@ async function connectToWhatsApp() {
             console.log(`📩 Chat: ${messageContent}`);
 
             // 3. Gemini AI Reply
-            if(!GEMINI_API_KEY) {
-                console.log("Error: Gemini API Key not found!");
-                return;
-            }
+            if(!GEMINI_API_KEY) return;
+            
             const model = genAI.getGenerativeModel({ model: "gemini-pro"});
             const result = await model.generateContent(messageContent);
             const response = await result.response;
