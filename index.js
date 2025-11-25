@@ -1,9 +1,12 @@
 import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pino from 'pino';
-import http from 'http'; // 1. http library එක import කරා
+import http from 'http';
 
-// 2. Koyeb Health Check එක පාස් කරන්න පොඩි server එකක් හදනවා
+// 1. Phone number එක මෙතන දාන්න (country code සමග, + නැතුව)
+const PAIRING_NUMBER = "YOUR_PHONE_NUMBER_HERE"; // උදා: "9471xxxxxxx"
+
+// 2. Koyeb Health Check
 const port = process.env.PORT || 8000;
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -24,20 +27,22 @@ async function connectToWhatsApp() {
 
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
         auth: state,
+        browser: ['Koyeb Bot', 'Chrome', '1.0.0'], // Browser info for pairing
     });
 
+    // 🔴 නව Pairing Code Logic එක
+    if (!sock.authState.creds.registered) {
+        const pairingCode = await sock.requestPairingCode(PAIRING_NUMBER);
+        console.log(`\n\n🟢 YOUR PAIRING CODE IS: ${pairingCode} 🟢\n\n`);
+    }
+    // ---------------------------------
+    
     sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
+        const { connection, lastDisconnect } = update;
         
-        if(qr) {
-            console.log("Scan the QR below:");
-        }
-
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            // Connection වැටුනොත් ආයේ connect වෙන්න
             if (shouldReconnect) {
                 connectToWhatsApp();
             }
@@ -47,6 +52,9 @@ async function connectToWhatsApp() {
     });
 
     sock.ev.on('creds.update', saveCreds);
+
+    // ... (rest of the message processing logic remains the same) ...
+    // ... (the rest of the code is the same as before, only the sock initialization part changed) ...
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         try {
@@ -60,7 +68,6 @@ async function connectToWhatsApp() {
             // 1. Auto Status Read
             if (from === 'status@broadcast') {
                 await sock.readMessages([key]);
-                console.log(`👀 Auto Read Status`);
                 return;
             }
 
@@ -69,8 +76,6 @@ async function connectToWhatsApp() {
 
             const messageContent = m.message.conversation || m.message.extendedTextMessage?.text;
             if (!messageContent || isMe) return;
-
-            console.log(`📩 Chat: ${messageContent}`);
 
             // 3. Gemini AI Reply
             if(!GEMINI_API_KEY) return;
@@ -86,6 +91,7 @@ async function connectToWhatsApp() {
             console.log("Error:", err);
         }
     });
+
 }
 
 connectToWhatsApp();
