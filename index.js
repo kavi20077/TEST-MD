@@ -3,7 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import pino from 'pino';
 import http from 'http';
 
-// 1. Phone Number from Settings
+// 1. Phone Number & API Key
 const PAIRING_NUMBER = process.env.PHONE_NUMBER; 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 
@@ -25,27 +25,28 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        // Ubuntu Browser එකක් ලෙස පෙනී සිටීම (Connection Closed නොවීමට)
+        // Browser එක Ubuntu/Chrome ලෙස දීම
         browser: Browsers.ubuntu('Chrome'),
         markOnlineOnConnect: true,
-        retryRequestDelayMs: 2000,
+        generateHighQualityLinkPreview: true,
+        retryRequestDelayMs: 5000,
     });
 
-    // 🔴 REVISED PAIRING LOGIC
+    // 🔴 Pairing Logic (FIXED: No Loop)
     if (!sock.authState.creds.registered) {
         if (!PAIRING_NUMBER) {
             console.log("❌ Error: PHONE_NUMBER not set in Koyeb!");
         } else {
-            // තත්පර 3ක් ඉඳලා ට්‍රයි කරනවා
+            // තත්පර 6ක් ඉඳලා එක පාරක් විතරක් කෝඩ් එක ඉල්ලනවා
+            console.log("⏳ Waiting 6 seconds before requesting code...");
             setTimeout(async () => {
                 try {
-                    console.log("⏳ Requesting Pairing Code...");
                     const pairingCode = await sock.requestPairingCode(PAIRING_NUMBER);
                     console.log(`\n\n🟢 YOUR PAIRING CODE: ${pairingCode} 🟢\n\n`);
                 } catch (err) {
-                    console.log("⚠️ Pairing Failed. Retrying logic will restart...");
+                    console.log("⚠️ Pairing Failed:", err.message);
                 }
-            }, 3000);
+            }, 6000);
         }
     }
     
@@ -55,7 +56,6 @@ async function connectToWhatsApp() {
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) {
-                // Connection වැටුනොත් ඉක්මනට එන්න (Delay නැතුව)
                 connectToWhatsApp();
             }
         } else if (connection === 'open') {
