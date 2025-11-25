@@ -1,12 +1,13 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, delay } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, delay, Browsers } from '@whiskeysockets/baileys';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import pino from 'pino';
 import http from 'http';
 
+// 1. Phone Number from Settings
 const PAIRING_NUMBER = process.env.PHONE_NUMBER; 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY; 
 
-// Health Check Server
+// 2. Health Check Server
 const port = process.env.PORT || 8000;
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -14,6 +15,7 @@ const server = http.createServer((req, res) => {
 });
 server.listen(port, () => console.log(`Server running on port ${port}`));
 
+// --- Bot Logic ---
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 async function connectToWhatsApp() {
@@ -23,32 +25,27 @@ async function connectToWhatsApp() {
         logger: pino({ level: 'silent' }),
         auth: state,
         printQRInTerminal: false,
-        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        // Ubuntu Browser එකක් ලෙස පෙනී සිටීම (Connection Closed නොවීමට)
+        browser: Browsers.ubuntu('Chrome'),
         markOnlineOnConnect: true,
-        generateHighQualityLinkPreview: true,
-        syncFullHistory: false,
-        // Connection එක stable තියාගන්න settings
-        connectTimeoutMs: 60000,
-        keepAliveIntervalMs: 10000,
         retryRequestDelayMs: 2000,
     });
 
-    // 🔴 Pairing Code Logic (Updated with DELAY)
+    // 🔴 REVISED PAIRING LOGIC
     if (!sock.authState.creds.registered) {
         if (!PAIRING_NUMBER) {
-            console.log("❌ Error: PHONE_NUMBER variable not found!");
+            console.log("❌ Error: PHONE_NUMBER not set in Koyeb!");
         } else {
-            // මෙතන අපි තත්පර 10ක් ඉන්නවා connection එක stable වෙනකම්
-            console.log("⏳ Waiting 10 seconds for stable connection...");
+            // තත්පර 3ක් ඉඳලා ට්‍රයි කරනවා
             setTimeout(async () => {
                 try {
+                    console.log("⏳ Requesting Pairing Code...");
                     const pairingCode = await sock.requestPairingCode(PAIRING_NUMBER);
                     console.log(`\n\n🟢 YOUR PAIRING CODE: ${pairingCode} 🟢\n\n`);
                 } catch (err) {
-                    console.log("⚠️ Pairing Failed (Retrying in 5s...):", err.message);
-                    // Error ආවොත් බොට්ව මරන්නේ නෑ
+                    console.log("⚠️ Pairing Failed. Retrying logic will restart...");
                 }
-            }, 10000); // 10000ms = 10 seconds
+            }, 3000);
         }
     }
     
@@ -58,7 +55,7 @@ async function connectToWhatsApp() {
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) {
-                console.log("🔄 Reconnecting...");
+                // Connection වැටුනොත් ඉක්මනට එන්න (Delay නැතුව)
                 connectToWhatsApp();
             }
         } else if (connection === 'open') {
