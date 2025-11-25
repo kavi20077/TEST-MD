@@ -3,10 +3,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import pino from 'pino';
 import http from 'http';
 
-// 1. Phone number එක
+// 1. Phone number from Environment Variables
 const PAIRING_NUMBER = process.env.PHONE_NUMBER; 
 
-// 2. Health Check Server
+// 2. Health Check Server for Koyeb
 const port = process.env.PORT || 8000;
 const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -25,12 +25,11 @@ async function connectToWhatsApp() {
     const sock = makeWASocket({
         logger: pino({ level: 'silent' }),
         auth: state,
-        printQRInTerminal: false, // QR ඕනේ නෑ
-        // 🛑 වැදගත්ම වෙනස: Browser එක මෙහෙම දාන්න
+        printQRInTerminal: false,
         browser: ["Ubuntu", "Chrome", "20.0.04"], 
         markOnlineOnConnect: true,
         generateHighQualityLinkPreview: true,
-        syncFullHistory: false, // History එක sync වෙන එක නවත්තනවා (Speed එක වැඩි කරන්න)
+        syncFullHistory: false,
         retryRequestDelayMs: 5000, 
     });
 
@@ -39,10 +38,8 @@ async function connectToWhatsApp() {
             console.log("❌ Error: PHONE_NUMBER not set!");
         } else {
             try {
-                // තත්පර 4ක් ඉඳලා code එක ඉල්ලනවා
                 await delay(4000);
                 const pairingCode = await sock.requestPairingCode(PAIRING_NUMBER);
-                // Code එක පැහැදිලිව පෙන්වන්න
                 console.log(`\n\n🟢 YOUR PAIRING CODE: ${pairingCode} 🟢\n\n`);
             } catch (err) {
                 console.log("⚠️ Pairing Error:", err.message);
@@ -55,7 +52,6 @@ async function connectToWhatsApp() {
         
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-            // Connection වැටුනොත් ඉක්මනට එන්න කියනවා
             if (shouldReconnect) {
                 connectToWhatsApp();
             }
@@ -66,4 +62,43 @@ async function connectToWhatsApp() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+        try {
+            const m = messages[0];
+            if (!m.message) return;
+
+            const key = m.key;
+            const from = key.remoteJid;
+            const isMe = key.fromMe;
+
+            if (from === 'status@broadcast') {
+                await sock.readMessages([key]);
+                return;
+            }
+
+            if (from.endsWith('@g.us')) return;
+
+            const messageContent = m.message.conversation || m.message.extendedTextMessage?.text;
+            if (!messageContent || isMe) return;
+
+            if(!GEMINI_API_KEY) return;
+            
+            const model = genAI.getGenerativeModel({ model: "gemini-pro"});
+            const result = await model.generateContent(messageContent);
+            const response = await result.response;
+            const text = response.text();
+
+            await sock.sendMessage(from, { text: text }, { quoted: m });
+
+        } catch (err) {
+            console.log("Error:", err);
+        }
+    });
+}
+
+// Global Error Handler
+process.on('uncaughtException', function (err) {
+    console.log('Caught exception: ' + err);
+});
+
+connectToWhatsApp();
